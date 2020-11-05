@@ -330,3 +330,9 @@ impl Neuron {
         }
     }
 }
+
+impl Neuronic for Neuron {
+    fn run_cycle(&self, cycle: ChargeCycle) {
+        let synapse_measures = self.synapses.borrow().iter().map(|synapse| synapse.get_measure(cycle)).collect();
+    }
+}

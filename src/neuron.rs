@@ -48,21 +48,21 @@ pub trait NeuronicInput {
 }
 
 /// Stores the Neuron's measure for different charge cycles
-pub struct NeuronCharge(f32, f32);
+pub struct NeuronCharge(Measure, Measure);
 
 impl NeuronCharge {
     pub fn new() -> NeuronCharge {
-        NeuronCharge(0.0, 0.0)
+        NeuronCharge(Measure::new(0.0, 0.0), Measure::new(0.0, 0.0))
     }
 
-    pub fn set_measure(&mut self, cycle: ChargeCycle, measure: f32) {
+    pub fn set_measure(&mut self, cycle: ChargeCycle, measure: Measure) {
         match cycle {
             ChargeCycle::Even => self.0 = measure,
             ChargeCycle::Odd => self.1 = measure,
         }
     }
 
-    pub fn get_measure(&self, cycle: ChargeCycle) -> f32 {
+    pub fn get_measure(&self, cycle: ChargeCycle) -> Measure {
         match cycle {
             ChargeCycle::Even => self.0,
             ChargeCycle::Odd => self.1,
@@ -91,7 +91,7 @@ impl ExternalWeightedCharge {
         self.num_charges += 1.;
     }
 
-    pub fn get_weighted_measure(&self) -> Measure {
+    pub fn get_measure(&self) -> Measure {
         Measure::new(
             self.weighted_value / self.total_weight,
             self.total_weight / self.num_charges,
@@ -123,10 +123,10 @@ impl ExternalCharge {
         }
     }
 
-    pub fn get_weighted_measure(&self, cycle: ChargeCycle) -> Measure {
+    pub fn get_measure(&self, cycle: ChargeCycle) -> Measure {
         match cycle {
-            ChargeCycle::Even => self.0.get_weighted_measure(),
-            ChargeCycle::Odd => self.1.get_weighted_measure(),
+            ChargeCycle::Even => self.0.get_measure(),
+            ChargeCycle::Odd => self.1.get_measure(),
         }
     }
 
@@ -193,7 +193,7 @@ impl InternalCharge {
         match cycle {
             ChargeCycle::Even => {
                 self.0.add_measure(measure, prediction_quality);
-            },
+            }
             ChargeCycle::Odd => {
                 self.1.add_measure(measure, prediction_quality);
             }
@@ -202,12 +202,8 @@ impl InternalCharge {
 
     pub fn get_measure(&self, cycle: ChargeCycle) -> Measure {
         match cycle {
-            ChargeCycle::Even => {
-                self.0.get_measure()
-            },
-            ChargeCycle::Odd => {
-                self.1.get_measure()
-            }
+            ChargeCycle::Even => self.0.get_measure(),
+            ChargeCycle::Odd => self.1.get_measure(),
         }
     }
 
@@ -215,7 +211,7 @@ impl InternalCharge {
         match cycle {
             ChargeCycle::Even => {
                 self.0.clear();
-            },
+            }
             ChargeCycle::Odd => {
                 self.1.clear();
             }
@@ -230,9 +226,8 @@ impl InternalCharge {
 
 pub struct Synapse {
     input: Rc<dyn NeuronicInput>,
-    ema: f32
+    ema: f32,
 }
-
 
 pub struct Neuron {
     synapses: RefCell<Vec<Rc<dyn NeuronicInput>>>,
@@ -242,7 +237,7 @@ pub struct Neuron {
     neuron_charge: RefCell<NeuronCharge>, //Takes internal and external charge into account
     learning_rate: f32,
     ema_alpha: f32,
-    get_quality: fn(value: f32, target: f32) -> f32 // Should return between 0 and 1
+    get_quality: fn(value: f32, target: f32) -> f32, // Should return between 0 and 1
 }
 
 impl Neuron {
@@ -251,7 +246,7 @@ impl Neuron {
     pub fn new(
         learning_rate: f32,
         ema_alpha: f32,
-        get_quality: fn(value: f32, target: f32) -> f32
+        get_quality: fn(value: f32, target: f32) -> f32,
     ) -> Neuron {
         Neuron {
             synapses: RefCell::new(Vec::new()),
@@ -261,7 +256,7 @@ impl Neuron {
             neuron_charge: RefCell::new(NeuronCharge::new()),
             learning_rate,
             ema_alpha,
-            get_quality
+            get_quality,
         }
     }
 
@@ -290,18 +285,31 @@ impl Neuron {
         *self.prediction_weights.borrow_mut() = initial_prediction_weights;
     }
 
-    pub fn intake_internal_charge(&self, cycle: ChargeCycle, measure: Measure, prediction_quality: f32) {
-        self.internal_charge.borrow_mut().add_measure(cycle, measure, prediction_quality);
+    pub fn intake_internal_charge(
+        &self,
+        cycle: ChargeCycle,
+        measure: Measure,
+        prediction_quality: f32,
+    ) {
+        self.internal_charge
+            .borrow_mut()
+            .add_measure(cycle, measure, prediction_quality);
     }
 
-    pub fn run_synapse_cycle(&self, cycle: ChargeCycle, synapse_index: usize, synapse_measure: Measure, neuron_weighted_measures: &Vec<f32>) {
+    pub fn run_synapse_cycle(
+        &self,
+        cycle: ChargeCycle,
+        synapse_index: usize,
+        synapse_measure: Measure,
+        synapse_weighted_values: &Vec<f32>,
+    ) {
         let mut prediction_weights = self.prediction_weights.borrow_mut();
         let mut weight_vector = prediction_weights.get_mut(synapse_index).unwrap();
 
         let mut prediction = 0.0;
 
         // Get prediction
-        for (i, weighted_measure) in neuron_weighted_measures.iter().enumerate() {
+        for (i, weighted_measure) in synapse_weighted_values.iter().enumerate() {
             if i != synapse_index {
                 let weight_index = if i < synapse_index { i } else { i - 1 };
                 prediction += *weighted_measure * weight_vector[weight_index];
@@ -316,13 +324,17 @@ impl Neuron {
         // Modify weights along the gradient
 
         // Make sure we're moving the prediction in the right direction along gradient
-        let learning_modifier = if prediction < synapse_measure.value { 1. } else { -1. };
+        let learning_modifier = if prediction < synapse_measure.value {
+            1.
+        } else {
+            -1.
+        };
 
         // Weight the learning rate so learning is smaller for less deterministic values (not worth it to try learning unstable values)
         let learning_constant = learning_modifier * self.learning_rate * synapse_measure.quality;
 
         // Update weights
-        for (i, weighted_measure) in neuron_weighted_measures.iter().enumerate() {
+        for (i, weighted_measure) in synapse_weighted_values.iter().enumerate() {
             if i != synapse_index {
                 let weight_index = if i < synapse_index { i } else { i - 1 };
                 weight_vector[weight_index] += *weighted_measure * learning_constant;
@@ -333,6 +345,74 @@ impl Neuron {
 
 impl Neuronic for Neuron {
     fn run_cycle(&self, cycle: ChargeCycle) {
-        let synapse_measures = self.synapses.borrow().iter().map(|synapse| synapse.get_measure(cycle)).collect();
+        let synapse_measures: Vec<Measure> = self
+            .synapses
+            .borrow()
+            .iter()
+            .map(|synapse| synapse.get_measure(cycle))
+            .collect();
+        let synapse_weighted_values: Vec<f32> = synapse_measures
+            .iter()
+            .map(|measure| measure.get_weighted_value())
+            .collect();
+
+        // Run each synapse
+        for (i, measure) in synapse_measures.iter().enumerate() {
+            self.run_synapse_cycle(cycle, i, *measure, &synapse_weighted_values);
+        }
+
+        let mut internal_charge = self.internal_charge.borrow_mut();
+        let mut external_charge = self.external_charge.borrow_mut();
+
+        let internal_measure = internal_charge.get_measure(cycle);
+        let external_measure = external_charge.get_measure(cycle);
+
+        let neuron_measure_value = (internal_measure.value * internal_measure.quality)
+            + ((1.0 - internal_measure.quality) * external_measure.value);
+        let neuron_measure_quality = (internal_measure.quality * internal_measure.quality)
+            + ((1.0 - internal_measure.quality) * external_measure.quality);
+
+        self.neuron_charge.borrow_mut().set_measure(
+            cycle,
+            Measure::new(neuron_measure_value, neuron_measure_quality),
+        );
+
+        // Reset internal and external charge
+        internal_charge.clear_cycle(cycle);
+        external_charge.clear_cycle(cycle);
     }
+}
+
+impl NeuronicInput for Neuron {
+    fn get_measure(&self, cycle: ChargeCycle) -> Measure {
+        self.neuron_charge.borrow().get_measure(cycle.prev_cycle())
+    }
+
+    fn intake_external_measure(&self, cycle: ChargeCycle, measure: Measure) {
+        self.external_charge.borrow_mut().add_measure(cycle.next_cycle(), measure);
+    }
+}
+
+pub struct NeuronicSensor {
+    value: RefCell<f32>
+}
+
+impl NeuronicSensor {
+    pub fn new(value: f32) -> NeuronicSensor {
+        NeuronicSensor {
+            value: RefCell::new(value)
+        }
+    }
+
+    pub fn set_value(&self, value: f32) {
+        *self.value.borrow_mut() = value;
+    }
+}
+
+impl NeuronicInput for NeuronicSensor {
+    fn get_measure(&self, _cycle: ChargeCycle) -> Measure {
+        Measure::new(*self.value.borrow(), 1.0)
+    }
+
+    fn intake_external_measure(&self, _cycle: ChargeCycle, _measure: Measure) {}
 }

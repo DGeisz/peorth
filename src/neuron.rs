@@ -245,7 +245,7 @@ impl Synapse {
 
 pub struct Neuron {
     synapses: RefCell<Vec<Synapse>>,
-    prediction_weights: RefCell<Vec<Vec<f32>>>,
+    pub prediction_weights: RefCell<Vec<Vec<f32>>>,
     external_charge: RefCell<ExternalCharge>,
     internal_charge: RefCell<InternalCharge>,
     neuron_charge: RefCell<NeuronCharge>, //Takes internal and external charge into account

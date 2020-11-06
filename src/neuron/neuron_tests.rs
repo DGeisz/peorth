@@ -16,10 +16,10 @@ fn cmp_f32(f1: f32, f2: f32) {
 #[test]
 fn test_basic_neuron() {
     let s1_value = 0.5;
-    let s1 = Rc::new(NeuronicSensor::new(s1_value));
+    let s1 = Rc::new(NeuronicSensor::new_custom_start(s1_value));
 
     let s2_value = 0.6;
-    let s2 = Rc::new(NeuronicSensor::new(s2_value));
+    let s2 = Rc::new(NeuronicSensor::new_custom_start(s2_value));
 
     let s2_w1 = 1.;
     let s1_w2 = 1.;
